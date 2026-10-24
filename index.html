@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="黒半透明化">
+<meta name="theme-color" content="#000000">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<title>黒半透明化</title>
+<style>
+:root{--bg:#0b0b0d;--panel:#16171a;--line:#2a2c31;--ink:#f2f2f0;--sub:#9a9da3;--accent:#f0c35a;--danger:#e2554f;color-scheme:dark}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;-webkit-user-select:none;user-select:none;overscroll-behavior:none}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+header{display:flex;gap:6px;padding:8px 12px 6px}
+.tab{flex:1;padding:10px 0;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--sub);font-size:15px;font-weight:600}
+.tab.on{background:var(--panel);color:var(--ink);border-color:#3a3d44}
+main{flex:1;min-height:0;display:flex;flex-direction:column}
+section{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 12px 10px;gap:8px}
+section[hidden]{display:none}
+#stageWrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;position:relative}
+#stage{background:#000;border-radius:6px;touch-action:none;box-shadow:0 0 0 1px var(--line)}
+#empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:14px;pointer-events:none;text-align:center;line-height:1.8}
+#empty[hidden],#selBar[hidden]{display:none}
+.row{display:flex;align-items:center;gap:8px}
+.op{font-size:14px;color:var(--sub);white-space:nowrap}
+.op b{color:var(--ink);font-variant-numeric:tabular-nums;display:inline-block;min-width:2.2em;text-align:right}
+input[type=range]{flex:1;accent-color:var(--accent);height:28px}
+button{font:inherit}
+.btn{flex:1;white-space:nowrap;padding:11px 6px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:14px;font-weight:600}
+.btn.main{background:var(--accent);color:#16130b;border-color:var(--accent)}
+.btn.warn{color:var(--danger)}
+.btn:disabled{opacity:.4}
+#strip{display:flex;gap:6px;overflow-x:auto;padding:2px 0;min-height:66px;scrollbar-width:none}
+#strip::-webkit-scrollbar{display:none}
+.th{flex:0 0 auto;width:36px;height:64px;border-radius:4px;background:#000 center/cover no-repeat;border:2px solid transparent;opacity:.7}
+.th.on{border-color:var(--accent);opacity:1}
+.info{font-size:13px;color:var(--sub)}
+#grid{flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;align-content:start;-webkit-user-select:none}
+.cell{position:relative;aspect-ratio:9/16;background:#000 center/cover no-repeat;border-radius:4px;border:2px solid transparent}
+.cell.sel{border-color:var(--accent)}
+.cell.sel::after{content:"";position:absolute;right:4px;top:4px;width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px #000}
+#viewer{position:fixed;inset:0;background:rgba(0,0,0,.94);display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 10px) 12px calc(env(safe-area-inset-bottom) + 12px);gap:10px;z-index:5}
+#viewer[hidden]{display:none}
+#viewer img{flex:1;min-height:0;object-fit:contain;width:100%}
+#busy{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9;font-size:15px}
+#busy[hidden]{display:none}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 90px);transform:translateX(-50%);background:#2b2d33;color:var(--ink);padding:9px 14px;border-radius:999px;font-size:13px;z-index:8;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+#toast.show{opacity:1}
+.ver{font-size:11px;color:#55585e;text-align:right}
+</style>
+</head>
+<body>
+<header>
+  <button class="tab on" id="tabEdit">作る</button>
+  <button class="tab" id="tabSaved">保存済み <span id="savedCount"></span></button>
+</header>
+<main>
+  <section id="edit">
+    <div id="stageWrap"><canvas id="stage" aria-label="編集画面"></canvas><div id="empty">下の「写真を選ぶ」から<br>写真を選んでください</div></div>
+    <div class="row"><span class="op">透明度 <b id="opv">60</b>%</span><input type="range" id="op" min="0" max="100" step="1" value="60" aria-label="透明度"></div>
+    <div class="row">
+      <button class="btn" id="btnReset">位置を戻す</button>
+      <button class="btn" id="btnBase">基本にする</button>
+      <button class="btn warn" id="btnRemove">外す</button>
+    </div>
+    <div id="strip"></div>
+    <div class="row">
+      <button class="btn" id="btnPick">写真を選ぶ</button>
+      <button class="btn main" id="btnExport">まとめて書き出す</button>
+    </div>
+    <input type="file" id="pick" accept="image/*" multiple hidden>
+  </section>
+  <section id="saved" hidden>
+    <div class="row"><span class="info" id="savedInfo"></span><span style="flex:1"></span><button class="btn" id="btnSelMode" style="flex:0 0 auto;padding:8px 14px">選ぶ</button></div>
+    <div id="grid"></div>
+    <div class="row" id="selBar" hidden>
+      <button class="btn" id="btnSelAll">全部選ぶ</button>
+      <button class="btn warn" id="btnDelSel">消す</button>
+      <button class="btn main" id="btnShareSel">写真に保存</button>
+    </div>
+    <div class="ver">v1.0</div>
+  </section>
+</main>
+<div id="viewer" hidden>
+  <img id="viewerImg" alt="">
+  <div class="row">
+    <button class="btn" id="vClose">閉じる</button>
+    <button class="btn warn" id="vDel">消す</button>
+    <button class="btn main" id="vShare">写真に保存</button>
+  </div>
+</div>
+<div id="busy" hidden><span id="busyText">書き出し中</span></div>
+<div id="toast"></div>
+<script>
+"use strict";
+const W = 1080, H = 1920, CHUNK = 20, PREVIEW_MAX = 2048;
+const $ = (id) => document.getElementById(id);
+
+/* ---------- 保存（スマホの中のデータベース） ---------- */
+let dbp = null;
+function db() {
+  if (!dbp) dbp = new Promise((res, rej) => {
+    const r = indexedDB.open("kuro-story", 1);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      d.createObjectStore("drafts", { keyPath: "id" });
+      d.createObjectStore("done", { keyPath: "id" });
+      d.createObjectStore("settings", { keyPath: "key" });
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return dbp;
+}
+async function tx(store, mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const t = d.transaction(store, mode), s = t.objectStore(store);
+    let out;
+    const r = fn(s);
+    if (r) r.onsuccess = () => { out = r.result; };
+    t.oncomplete = () => res(out);
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error);
+  });
+}
+const put = (store, v) => tx(store, "readwrite", (s) => s.put(v));
+const del = (store, k) => tx(store, "readwrite", (s) => s.delete(k));
+const all = (store) => tx(store, "readonly", (s) => s.getAll());
+const get = (store, k) => tx(store, "readonly", (s) => s.get(k));
+
+/* ---------- 状態 ---------- */
+let base = 60;            // 新しく選んだ写真の透明度
+let drafts = [];          // 編集待ち {id,name,blob,thumbUrl,w,h,p:{cx,cy,s,op}}
+let cur = -1;             // いま編集中の番号
+let prev = null;          // 編集中の写真（画面用に縮小したもの）
+let saved = [];           // 書き出し済み {id,name,created,size,blob,thumb}
+let selMode = false, sel = new Set(), pendingShare = null;
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+function baseName(n) { return (n || "image").replace(/\.[^.]+$/, ""); }
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2200); }
+function busy(text) { $("busy").hidden = !text; if (text) $("busyText").textContent = text; }
+
+function loadImage(blob) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob), img = new Image();
+    img.onload = () => res({ img, url });
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("画像を読めませんでした")); };
+    img.src = url;
+  });
+}
+function fitParams(w, h) { const s = Math.max(W / w, H / h); return { cx: W / 2, cy: H / 2, s }; }
+function canvasBlob(c, q) { return new Promise((r) => c.toBlob(r, "image/jpeg", q)); }
+// iPhoneは使い終わった描画面の解放が遅く、溜まると止まるので、すぐ空にする
+function freeCanvas(c) { if (c) { c.width = 0; c.height = 0; } }
+
+/* 書き出しと画面の共通の描き方：黒の上に、写真を「透明度」で重ねる（Canvaの設定と同じ考え方） */
+function paint(ctx, src, sw, sh, p, k) {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, W * k, H * k);
+  const dw = sw * p.s * k, dh = sh * p.s * k;
+  ctx.globalAlpha = p.op / 100;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, p.cx * k - dw / 2, p.cy * k - dh / 2, dw, dh);
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- 編集画面 ---------- */
+const stage = $("stage"), sctx = stage.getContext("2d");
+let k = 0.3, dpr = 1;
+function layout() {
+  const wrap = $("stageWrap").getBoundingClientRect();
+  const cssH = Math.max(120, Math.min(wrap.height, wrap.width * H / W));
+  const cssW = cssH * W / H;
+  dpr = Math.min(window.devicePixelRatio || 1, 3);
+  stage.style.width = cssW + "px"; stage.style.height = cssH + "px";
+  stage.width = Math.round(cssW * dpr); stage.height = Math.round(cssH * dpr);
+  k = cssW / W;
+  draw();
+}
+let raf = 0;
+function draw() {
+  if (raf) return;
+  raf = requestAnimationFrame(() => {
+    raf = 0;
+    const d = drafts[cur];
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (!d || !prev) { sctx.fillStyle = "#000"; sctx.fillRect(0, 0, stage.width, stage.height); return; }
+    const f = prev.width / d.w;  // 縮小した写真→元の写真
+    const p = { cx: d.p.cx, cy: d.p.cy, s: d.p.s / f, op: d.p.op };
+    paint(sctx, prev, prev.width, prev.height, p, k * dpr);
+  });
+}
+async function select(i) {
+  if (i < 0 || i >= drafts.length) { cur = -1; freeCanvas(prev); prev = null; refreshEdit(); draw(); return; }
+  cur = i;
+  refreshEdit();
+  const d = drafts[i];
+  try {
+    const { img, url } = await loadImage(d.blob);
+    if (cur !== i) { URL.revokeObjectURL(url); return; }
+    const sc = Math.min(1, PREVIEW_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * sc); c.height = Math.round(img.naturalHeight * sc);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    freeCanvas(prev); prev = c;
+  } catch (e) { prev = null; toast(e.message); }
+  draw();
+}
+function refreshEdit() {
+  const d = drafts[cur];
+  $("empty").hidden = drafts.length > 0;
+  $("op").value = d ? d.p.op : base;
+  $("opv").textContent = d ? d.p.op : base;
+  ["btnReset", "btnRemove", "op"].forEach((id) => { $(id).disabled = !d; });
+  $("btnExport").disabled = drafts.length === 0;
+  $("btnExport").textContent = drafts.length ? `まとめて書き出す（${drafts.length}枚）` : "まとめて書き出す";
+  const strip = $("strip");
+  strip.innerHTML = "";
+  drafts.forEach((x, i) => {
+    const t = document.createElement("button");
+    t.className = "th" + (i === cur ? " on" : "");
+    t.style.backgroundImage = `url(${x.thumbUrl})`;
+    t.setAttribute("aria-label", `${i + 1}枚目`);
+    t.onclick = () => select(i);
+    strip.appendChild(t);
+  });
+  const on = strip.children[cur];
+  if (on) on.scrollIntoView({ block: "nearest", inline: "center" });
+}
+let saveT = 0;
+function saveDraftSoon() {
+  const d = drafts[cur]; if (!d) return;
+  clearTimeout(saveT);
+  saveT = setTimeout(() => put("drafts", { id: d.id, name: d.name, blob: d.blob, thumb: d.thumb, w: d.w, h: d.h, p: d.p, added: d.added }), 300);
+}
+
+/* 指の操作：1本で移動、2本で拡大縮小、2回タップで元に戻す */
+const pts = new Map();
+let g = null, lastTap = 0;
+function toOut(e) { const r = stage.getBoundingClientRect(); return { x: (e.clientX - r.left) / k, y: (e.clientY - r.top) / k }; }
+function startGesture() {
+  const d = drafts[cur]; if (!d) return;
+  const ps = [...pts.values()];
+  if (ps.length === 1) g = { mode: 1, x: ps[0].x, y: ps[0].y, cx: d.p.cx, cy: d.p.cy };
+  else if (ps.length >= 2) {
+    const [a, b] = ps, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    g = { mode: 2, dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: d.p.s, ax: (mx - d.p.cx) / d.p.s, ay: (my - d.p.cy) / d.p.s };
+  } else g = null;
+}
+stage.addEventListener("pointerdown", (e) => {
+  if (!drafts[cur]) return;
+  try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+  pts.set(e.pointerId, toOut(e));
+  const now = Date.now();
+  if (pts.size === 1 && now - lastTap < 300) { resetPos(); lastTap = 0; } else if (pts.size === 1) lastTap = now;
+  startGesture();
+});
+stage.addEventListener("pointermove", (e) => {
+  if (!pts.has(e.pointerId) || !g) return;
+  pts.set(e.pointerId, toOut(e));
+  const d = drafts[cur], ps = [...pts.values()];
+  if (g.mode === 1 && ps.length === 1) {
+    d.p.cx = g.cx + (ps[0].x - g.x); d.p.cy = g.cy + (ps[0].y - g.y);
+  } else if (g.mode === 2 && ps.length >= 2) {
+    const [a, b] = ps, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const s = Math.min(40, Math.max(0.01, g.s * Math.hypot(a.x - b.x, a.y - b.y) / g.dist));
+    d.p.s = s; d.p.cx = mx - g.ax * s; d.p.cy = my - g.ay * s;
+  }
+  draw(); saveDraftSoon();
+});
+function endPointer(e) { if (!pts.delete(e.pointerId)) return; startGesture(); }
+stage.addEventListener("pointerup", endPointer);
+stage.addEventListener("pointercancel", endPointer);
+stage.addEventListener("wheel", (e) => {   // パソコンで試すとき用
+  const d = drafts[cur]; if (!d) return; e.preventDefault();
+  const m = toOut(e), f = Math.exp(-e.deltaY / 500), ax = (m.x - d.p.cx) / d.p.s, ay = (m.y - d.p.cy) / d.p.s;
+  d.p.s *= f; d.p.cx = m.x - ax * d.p.s; d.p.cy = m.y - ay * d.p.s; draw(); saveDraftSoon();
+}, { passive: false });
+document.addEventListener("gesturestart", (e) => e.preventDefault());
+
+function resetPos() { const d = drafts[cur]; if (!d) return; Object.assign(d.p, fitParams(d.w, d.h)); draw(); saveDraftSoon(); }
+$("btnReset").onclick = resetPos;
+$("op").addEventListener("input", (e) => { const d = drafts[cur]; if (!d) return; d.p.op = +e.target.value; $("opv").textContent = d.p.op; draw(); saveDraftSoon(); });
+$("btnBase").onclick = async () => {
+  const d = drafts[cur]; const v = d ? d.p.op : +$("op").value;
+  base = v; await put("settings", { key: "base", value: v }); toast(`これから選ぶ写真は透明度${v}%から始まります`);
+};
+$("btnRemove").onclick = async () => {
+  const d = drafts[cur]; if (!d) return;
+  await del("drafts", d.id); URL.revokeObjectURL(d.thumbUrl);
+  drafts.splice(cur, 1);
+  select(Math.min(cur, drafts.length - 1));
+};
+
+/* 写真を選ぶ */
+$("btnPick").onclick = () => { $("pick").value = ""; $("pick").click(); };
+$("pick").addEventListener("change", async (e) => {
+  const files = [...e.target.files]; if (!files.length) return;
+  const first = drafts.length;
+  for (let i = 0; i < files.length; i++) {
+    busy(`写真を読み込み中 ${i + 1}/${files.length}`);
+    try {
+      const f = files[i], { img, url } = await loadImage(f);
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const tc = document.createElement("canvas"), ts = 160 / Math.max(w, h);
+      tc.width = Math.max(1, Math.round(w * ts)); tc.height = Math.max(1, Math.round(h * ts));
+      tc.getContext("2d").drawImage(img, 0, 0, tc.width, tc.height);
+      URL.revokeObjectURL(url);
+      const thumb = await canvasBlob(tc, 0.7); freeCanvas(tc);
+      const d = { id: uid(), name: f.name, blob: f, thumb, w, h, p: { ...fitParams(w, h), op: base }, added: Date.now() };
+      await put("drafts", { id: d.id, name: d.name, blob: d.blob, thumb: d.thumb, w, h, p: d.p, added: d.added });
+      d.thumbUrl = URL.createObjectURL(thumb);
+      drafts.push(d);
+    } catch (err) { toast(`${files[i].name} を読めませんでした`); }
+  }
+  busy("");
+  select(first < drafts.length ? first : cur);
+});
+
+/* まとめて書き出す */
+$("btnExport").onclick = async () => {
+  if (!drafts.length) return;
+  if (navigator.storage && navigator.storage.persist) { try { await navigator.storage.persist(); } catch (e) {} }
+  const out = [], c = document.createElement("canvas"); c.width = W; c.height = H;
+  const ctx = c.getContext("2d");
+  const list = drafts.slice(), t0 = Date.now();   // 同じ回の分は、選んだ順に並ぶようにする
+  for (let i = 0; i < list.length; i++) {
+    busy(`書き出し中 ${i + 1}/${list.length}`);
+    const d = list[i];
+    try {
+      const { img, url } = await loadImage(d.blob);
+      paint(ctx, img, img.naturalWidth, img.naturalHeight, { ...d.p, s: d.p.s * d.w / img.naturalWidth }, 1);
+      URL.revokeObjectURL(url);
+      const blob = await canvasBlob(c, 0.92);
+      const tc = document.createElement("canvas"); tc.width = 180; tc.height = 320;
+      tc.getContext("2d").drawImage(c, 0, 0, 180, 320);
+      const thumb = await canvasBlob(tc, 0.75); freeCanvas(tc);
+      const rec = { id: uid(), name: baseName(d.name) + ".jpg", created: t0 - i, size: blob.size, blob, thumb };
+      await put("done", rec);
+      await del("drafts", d.id);
+      out.push(rec.id);
+    } catch (err) { toast(`${d.name} を書き出せませんでした`); continue; }
+  }
+  freeCanvas(c);
+  drafts.forEach((d) => URL.revokeObjectURL(d.thumbUrl));
+  drafts = (await all("drafts")).sort((a, b) => a.added - b.added).map((d) => ({ ...d, thumbUrl: URL.createObjectURL(d.thumb) }));
+  busy("");
+  await loadSaved();
+  select(drafts.length ? 0 : -1);
+  showTab("saved");
+  setSelMode(true);
+  sel = new Set(out);
+  renderGrid();
+  toast(`${out.length}枚を書き出しました。下の「写真に保存」で写真アプリに入ります`);
+};
+
+/* ---------- 保存済み ---------- */
+async function loadSaved() {
+  saved.forEach((s) => s.thumbUrl && URL.revokeObjectURL(s.thumbUrl));
+  saved = (await all("done")).sort((a, b) => b.created - a.created).map((s) => ({ ...s, thumbUrl: URL.createObjectURL(s.thumb) }));
+  renderGrid();
+}
+function renderGrid() {
+  const grid = $("grid"); grid.innerHTML = "";
+  saved.forEach((s) => {
+    const el = document.createElement("div");
+    el.className = "cell" + (sel.has(s.id) ? " sel" : "");
+    el.style.backgroundImage = `url(${s.thumbUrl})`;
+    el.onclick = () => { if (selMode) { sel.has(s.id) ? sel.delete(s.id) : sel.add(s.id); renderGrid(); } else openViewer(s); };
+    grid.appendChild(el);
+  });
+  const bytes = saved.reduce((a, s) => a + (s.size || 0), 0), mb = bytes / 1e6;
+  const vol = mb < 1 ? `${Math.max(1, Math.round(bytes / 1e3))}KB` : `${mb < 10 ? mb.toFixed(1) : Math.round(mb)}MB`;
+  $("savedInfo").textContent = selMode ? `${sel.size}枚を選択中` + (sel.size > CHUNK ? `・${CHUNK}枚ずつ保存` : "") : `${saved.length}枚・約${vol}`;
+  $("savedCount").textContent = saved.length ? `(${saved.length})` : "";
+  updateShareBtn();
+}
+function setSelMode(on) {
+  selMode = on; if (!on) sel.clear();
+  $("selBar").hidden = !on; $("btnSelMode").textContent = on ? "やめる" : "選ぶ";
+  renderGrid();
+}
+$("btnSelMode").onclick = () => setSelMode(!selMode);
+$("btnSelAll").onclick = () => { sel = sel.size === saved.length ? new Set() : new Set(saved.map((s) => s.id)); renderGrid(); };
+$("btnDelSel").onclick = async () => {
+  if (!sel.size) return;
+  if (!confirm(`${sel.size}枚を消しますか？（元の写真は消えません）`)) return;
+  for (const id of sel) await del("done", id);
+  sel.clear(); await loadSaved();
+};
+
+/* 写真アプリへ渡す（iPhoneの共有シート）。多いときは20枚ずつ */
+function filesOf(ids) {
+  return saved.filter((s) => ids.includes(s.id)).map((s) => new File([s.blob], s.name, { type: "image/jpeg", lastModified: s.created }));
+}
+function updateShareBtn() {
+  const ids = saved.filter((s) => sel.has(s.id)).map((s) => s.id);
+  const b = $("btnShareSel");
+  b.disabled = !ids.length;
+  pendingShare = ids.slice(0, CHUNK);
+}
+async function shareFiles(files) {
+  if (navigator.canShare && navigator.canShare({ files })) {
+    try { await navigator.share({ files }); return true; }
+    catch (e) { if (e && e.name === "AbortError") return false; toast("保存できませんでした。もう一度押してください"); return false; }
+  }
+  for (const f of files) {   // 共有シートが無いとき（パソコン）は1枚ずつダウンロード
+    const a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = f.name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return true;
+}
+$("btnShareSel").onclick = async () => {
+  if (!pendingShare || !pendingShare.length) return;
+  const ids = pendingShare;
+  const ok = await shareFiles(filesOf(ids));
+  if (ok) { ids.forEach((id) => sel.delete(id)); renderGrid(); if (sel.size) toast(`続きがあります（残り${sel.size}枚）`); }
+};
+
+let vItem = null;
+function openViewer(s) { vItem = s; const u = URL.createObjectURL(s.blob); $("viewerImg").src = u; $("viewer").hidden = false; }
+function closeViewer() { if ($("viewerImg").src) URL.revokeObjectURL($("viewerImg").src); $("viewerImg").removeAttribute("src"); $("viewer").hidden = true; vItem = null; }
+$("vClose").onclick = closeViewer;
+$("vShare").onclick = () => { if (vItem) shareFiles(filesOf([vItem.id])); };
+$("vDel").onclick = async () => { if (!vItem || !confirm("この画像を消しますか？（元の写真は消えません）")) return; await del("done", vItem.id); closeViewer(); await loadSaved(); };
+
+/* ---------- タブ ---------- */
+function showTab(t) {
+  $("edit").hidden = t !== "edit"; $("saved").hidden = t !== "saved";
+  $("tabEdit").classList.toggle("on", t === "edit"); $("tabSaved").classList.toggle("on", t === "saved");
+  if (t === "edit") requestAnimationFrame(layout);
+}
+$("tabEdit").onclick = () => showTab("edit");
+$("tabSaved").onclick = () => { showTab("saved"); };
+
+/* ---------- 起動 ---------- */
+(async function init() {
+  try {
+    const b = await get("settings", "base"); if (b) base = b.value;
+    drafts = (await all("drafts")).sort((a, x) => a.added - x.added).map((d) => ({ ...d, thumbUrl: URL.createObjectURL(d.thumb) }));
+    await loadSaved();
+  } catch (e) { toast("この端末では保存ができません"); }
+  layout();
+  select(drafts.length ? 0 : -1);
+  new ResizeObserver(layout).observe($("stageWrap"));
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
+
+/* 動作確認用（画面には出ない） */
+window.__kuro = { get drafts() { return drafts; }, get saved() { return saved; }, get cur() { return cur; }, select, paint, W, H };
+</script>
+</body>
+</html>
